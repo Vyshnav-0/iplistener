@@ -19,7 +19,8 @@ import time
 VENV_DIR = "recon_venv"
 REQUIREMENTS = [
     "PyPDF2>=3.0.1",
-    "reportlab>=4.0.8"
+    "reportlab>=4.0.8",
+    "requests>=2.31.0"  # Added for cloudflared download
 ]
 
 def download_cloudflared():
@@ -186,6 +187,7 @@ class VirtualEnvManager:
                 
                 venv.create(self.venv_dir, with_pip=True)
                 self.install_requirements(verbose=True)
+                return True
             except Exception as e:
                 print(f"[-] Failed to create virtual environment: {str(e)}")
                 self.cleanup()
@@ -197,11 +199,11 @@ class VirtualEnvManager:
                 print("3. Activate it:")
                 print("   source recon_venv/bin/activate")
                 print("4. Install requirements:")
-                print("   pip install PyPDF2 reportlab")
-                sys.exit(1)
+                print("   pip install PyPDF2 reportlab requests")
+                return False
         else:
             print("[+] Virtual environment exists")
-            self.install_requirements()
+            return self.install_requirements()
 
     def install_requirements(self, verbose=False):
         """Install required packages"""
@@ -222,6 +224,7 @@ class VirtualEnvManager:
                 
             if verbose:
                 print("[+] All requirements installed successfully")
+            return True
                 
         except Exception as e:
             print(f"[-] Error installing requirements: {str(e)}")
@@ -231,10 +234,11 @@ class VirtualEnvManager:
                     # Try using python -m pip as alternative
                     subprocess.check_call([
                         self.python_executable, "-m", "pip", "install", 
-                        "PyPDF2", "reportlab"
+                        "PyPDF2", "reportlab", "requests"
                     ], stdout=subprocess.DEVNULL if not verbose else None,
                        stderr=subprocess.DEVNULL if not verbose else None)
                     print("[+] Alternative installation successful")
+                    return True
                 except:
                     self.cleanup()
                     print("[-] Both installation methods failed. Please try manually:")
@@ -243,8 +247,8 @@ class VirtualEnvManager:
                     print("2. Activate it:")
                     print("   source recon_venv/bin/activate")
                     print("3. Install packages:")
-                    print("   pip install PyPDF2 reportlab")
-                    sys.exit(1)
+                    print("   pip install PyPDF2 reportlab requests")
+                    return False
 
     def run_in_venv(self, args):
         """Run script in virtual environment"""
@@ -428,6 +432,17 @@ def create_payload(server_url):
         print(f"[-] Error creating PDF payload: {str(e)}")
         return None
 
+def ensure_venv():
+    """Ensure virtual environment exists and requirements are installed"""
+    if not is_venv():
+        print("[+] Setting up virtual environment...")
+        venv_manager = VirtualEnvManager()
+        if venv_manager.create_venv():
+            venv_manager.run_in_venv(sys.argv)
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
@@ -439,6 +454,9 @@ def main():
         print("2. python recon_tool.py payload http://your-ip:8080")
         print("3. python recon_tool.py share 8000")
         sys.exit(1)
+    
+    # Ensure virtual environment and requirements before running any command
+    ensure_venv()
     
     command = sys.argv[1].lower()
     
@@ -481,11 +499,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    # If running the script directly, execute in virtual environment
-    if not is_venv():
-        print("[+] Setting up virtual environment...")
-        venv_manager = VirtualEnvManager()
-        venv_manager.create_venv()
-        venv_manager.run_in_venv(sys.argv)
-    else:
-        main() 
+    main() 
