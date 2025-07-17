@@ -72,6 +72,31 @@ class VirtualEnvManager:
                 print(f"Unexpected error: {str(e)}")
             return False
 
+    def ensure_pip_installed(self):
+        """Ensure pip is installed in the virtual environment"""
+        try:
+            # Try to run pip to check if it's working
+            subprocess.run([self.pip_executable, "--version"], 
+                         stdout=subprocess.DEVNULL, 
+                         stderr=subprocess.DEVNULL, 
+                         check=True)
+        except:
+            print("[yellow]Installing pip in virtual environment...[/yellow]")
+            # Download get-pip.py
+            import urllib.request
+            get_pip_url = "https://bootstrap.pypa.io/get-pip.py"
+            get_pip_path = os.path.join(self.venv_dir, "get-pip.py")
+            
+            try:
+                urllib.request.urlretrieve(get_pip_url, get_pip_path)
+                # Install pip
+                subprocess.run([self.python_executable, get_pip_path], 
+                             stdout=subprocess.DEVNULL, 
+                             stderr=subprocess.DEVNULL)
+            finally:
+                if os.path.exists(get_pip_path):
+                    os.remove(get_pip_path)
+
     def create_venv(self):
         """Create virtual environment if it doesn't exist"""
         from rich.console import Console
