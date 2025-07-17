@@ -13,6 +13,8 @@ from datetime import datetime
 import webbrowser
 import base64
 import struct
+import sys
+import pkg_resources
 
 # Define constants
 VENV_DIR = "recon_venv"
@@ -21,23 +23,72 @@ REQUIREMENTS = [
     "tzlocal==5.2.1",
     "flask==3.0.0",
     "rich==13.7.0",
-    "Pillow==10.2.0",  # For image manipulation
-    "PyPDF2==3.0.1",   # For PDF manipulation
+    "Pillow==10.2.0",
+    "PyPDF2==3.0.1"
 ]
 
 class VirtualEnvManager:
     def __init__(self):
         self.venv_dir = VENV_DIR
+        self.is_windows = platform.system().lower() == "windows"
+        self.bin_dir = "Scripts" if self.is_windows else "bin"
+        
         self.python_executable = os.path.join(
             self.venv_dir,
-            "Scripts" if platform.system() == "Windows" else "bin",
-            "python"
+            self.bin_dir,
+            "python.exe" if self.is_windows else "python"
         )
         self.pip_executable = os.path.join(
             self.venv_dir,
-            "Scripts" if platform.system() == "Windows" else "bin",
-            "pip"
+            self.bin_dir,
+            "pip.exe" if self.is_windows else "pip"
         )
+
+    def run_command(self, cmd, verbose=False):
+        """Run a command and handle errors"""
+        try:
+            if verbose:
+                result = subprocess.run(cmd, text=True, capture_output=True)
+                if result.returncode != 0:
+                    print(f"Error output: {result.stderr}")
+                return result.returncode == 0
+            else:
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                return True
+        except subprocess.CalledProcessError as e:
+            if verbose:
+                print(f"Command failed: {' '.join(cmd)}")
+                print(f"Error: {str(e)}")
+            return False
+        except Exception as e:
+            if verbose:
+                print(f"Unexpected error: {str(e)}")
+            return False
+
+    def ensure_pip_installed(self):
+        """Ensure pip is installed in the virtual environment"""
+        try:
+            # Try to run pip to check if it's working
+            subprocess.run([self.pip_executable, "--version"], 
+                         stdout=subprocess.DEVNULL, 
+                         stderr=subprocess.DEVNULL, 
+                         check=True)
+        except:
+            print("[yellow]Installing pip in virtual environment...[/yellow]")
+            # Download get-pip.py
+            import urllib.request
+            get_pip_url = "https://bootstrap.pypa.io/get-pip.py"
+            get_pip_path = os.path.join(self.venv_dir, "get-pip.py")
+            
+            try:
+                urllib.request.urlretrieve(get_pip_url, get_pip_path)
+                # Install pip
+                subprocess.run([self.python_executable, get_pip_path], 
+                             stdout=subprocess.DEVNULL, 
+                             stderr=subprocess.DEVNULL)
+            finally:
+                if os.path.exists(get_pip_path):
+                    os.remove(get_pip_path)
 
     def create_venv(self):
         """Create virtual environment if it doesn't exist"""
@@ -47,24 +98,26 @@ class VirtualEnvManager:
         console = Console()
         
         if not os.path.exists(self.venv_dir):
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True,
-            ) as progress:
-                progress.add_task("Creating virtual environment...", total=None)
+            console.print("[yellow]Creating new virtual environment...[/yellow]")
+            try:
                 venv.create(self.venv_dir, with_pip=True)
-                self.install_requirements()
+                self.ensure_pip_installed()
+                self.install_requirements(verbose=True)
+            except Exception as e:
+                console.print(f"[red]Failed to create virtual environment: {str(e)}[/red]")
+                sys.exit(1)
         else:
-            console.print("[green]✓[/green] Virtual environment already exists")
+            console.print("[green]✓[/green] Virtual environment exists")
+            self.install_requirements()
 
-    def install_requirements(self):
+    def install_requirements(self, verbose=False):
         """Install required packages"""
         from rich.console import Console
-        from rich.progress import Progress, SpinnerColumn, TextColumn
-        
         console = Console()
+        
+        if verbose:
+            console.print("[yellow]Installing requirements...[/yellow]")
+        
         requirements_file = "requirements.txt"
         
         # Create temporary requirements file
@@ -72,26 +125,49 @@ class VirtualEnvManager:
             f.write("\n".join(REQUIREMENTS))
         
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True,
-            ) as progress:
-                task = progress.add_task("Installing requirements...", total=None)
-                subprocess.check_call([
-                    self.pip_executable,
-                    "install", "-r", requirements_file
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                progress.update(task, completed=True)
+            # First upgrade pip
+            if not self.run_command([self.pip_executable, "install", "--upgrade", "pip"], verbose):
+                raise Exception("Failed to upgrade pip")
+
+            # Then install requirements one by one
+            for requirement in REQUIREMENTS:
+                if verbose:
+                    console.print(f"Installing {requirement}...")
+                if not self.run_command([self.pip_executable, "install", requirement], verbose):
+                    raise Exception(f"Failed to install {requirement}")
+                
+            if verbose:
+                console.print("[green]✓[/green] All requirements installed successfully")
+                
+        except Exception as e:
+            console.print(f"[red]Error installing requirements: {str(e)}[/red]")
+            if verbose:
+                console.print("[yellow]Trying alternative installation method...[/yellow]")
+                try:
+                    # Try using python -m pip as alternative
+                    subprocess.check_call([
+                        self.python_executable, "-m", "pip", "install", "-r", requirements_file
+                    ], stdout=subprocess.DEVNULL if not verbose else None,
+                       stderr=subprocess.DEVNULL if not verbose else None)
+                    console.print("[green]✓[/green] Alternative installation successful")
+                except:
+                    console.print("[red]Both installation methods failed. Please install requirements manually:[/red]")
+                    console.print(f"1. Activate the virtual environment")
+                    console.print(f"2. Run: pip install -r {requirements_file}")
+                    sys.exit(1)
         finally:
+            # Clean up temporary file
             if os.path.exists(requirements_file):
                 os.remove(requirements_file)
 
     def run_in_venv(self, args):
         """Run script in virtual environment"""
         cmd = [self.python_executable] + args
-        subprocess.call(cmd)
+        try:
+            subprocess.call(cmd)
+        except Exception as e:
+            print(f"Error running in virtual environment: {str(e)}")
+            sys.exit(1)
 
 class PayloadGenerator:
     def __init__(self):
