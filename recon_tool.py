@@ -19,12 +19,12 @@ import pkg_resources
 # Define constants
 VENV_DIR = "recon_venv"
 REQUIREMENTS = [
-    "requests==2.31.0",
-    "tzlocal==5.2.1",
-    "flask==3.0.0",
-    "rich==13.7.0",
-    "Pillow==10.2.0",
-    "PyPDF2==3.0.1"
+    "requests>=2.31.0",
+    "tzlocal>=5.3.1",  # Updated to latest available version
+    "flask>=3.0.0",
+    "rich>=13.7.0",
+    "Pillow>=10.2.0",
+    "PyPDF2>=3.0.1"
 ]
 
 class VirtualEnvManager:
@@ -43,6 +43,15 @@ class VirtualEnvManager:
             self.bin_dir,
             "pip.exe" if self.is_windows else "pip"
         )
+
+    def cleanup(self):
+        """Remove virtual environment directory"""
+        import shutil
+        try:
+            if os.path.exists(self.venv_dir):
+                shutil.rmtree(self.venv_dir)
+        except Exception as e:
+            print(f"Warning: Failed to cleanup virtual environment: {str(e)}")
 
     def run_command(self, cmd, verbose=False):
         """Run a command and handle errors"""
@@ -93,18 +102,37 @@ class VirtualEnvManager:
     def create_venv(self):
         """Create virtual environment if it doesn't exist"""
         from rich.console import Console
-        from rich.progress import Progress, SpinnerColumn, TextColumn
-        
         console = Console()
         
         if not os.path.exists(self.venv_dir):
             console.print("[yellow]Creating new virtual environment...[/yellow]")
             try:
+                # First try to install python3-venv if not present
+                try:
+                    subprocess.run(["apt-get", "update"], 
+                                 stdout=subprocess.DEVNULL, 
+                                 stderr=subprocess.DEVNULL)
+                    subprocess.run(["apt-get", "install", "-y", "python3-venv"], 
+                                 stdout=subprocess.DEVNULL, 
+                                 stderr=subprocess.DEVNULL)
+                except:
+                    pass  # Ignore if fails (might not be Debian-based or no sudo)
+                
                 venv.create(self.venv_dir, with_pip=True)
                 self.ensure_pip_installed()
                 self.install_requirements(verbose=True)
             except Exception as e:
                 console.print(f"[red]Failed to create virtual environment: {str(e)}[/red]")
+                self.cleanup()  # Clean up failed environment
+                console.print("\n[yellow]Please try these manual steps:[/yellow]")
+                console.print("1. Install python3-venv:")
+                console.print("   sudo apt-get update && sudo apt-get install python3-venv")
+                console.print("2. Create virtual environment:")
+                console.print("   python -m venv recon_venv")
+                console.print("3. Activate it:")
+                console.print("   source recon_venv/bin/activate")
+                console.print("4. Install requirements:")
+                console.print("   pip install requests tzlocal flask rich Pillow PyPDF2")
                 sys.exit(1)
         else:
             console.print("[green]✓[/green] Virtual environment exists")
@@ -117,12 +145,6 @@ class VirtualEnvManager:
         
         if verbose:
             console.print("[yellow]Installing requirements...[/yellow]")
-        
-        requirements_file = "requirements.txt"
-        
-        # Create temporary requirements file
-        with open(requirements_file, "w") as f:
-            f.write("\n".join(REQUIREMENTS))
         
         try:
             # First upgrade pip
@@ -146,19 +168,21 @@ class VirtualEnvManager:
                 try:
                     # Try using python -m pip as alternative
                     subprocess.check_call([
-                        self.python_executable, "-m", "pip", "install", "-r", requirements_file
+                        self.python_executable, "-m", "pip", "install", 
+                        "requests", "tzlocal", "flask", "rich", "Pillow", "PyPDF2"
                     ], stdout=subprocess.DEVNULL if not verbose else None,
                        stderr=subprocess.DEVNULL if not verbose else None)
                     console.print("[green]✓[/green] Alternative installation successful")
                 except:
-                    console.print("[red]Both installation methods failed. Please install requirements manually:[/red]")
-                    console.print(f"1. Activate the virtual environment")
-                    console.print(f"2. Run: pip install -r {requirements_file}")
+                    self.cleanup()  # Clean up failed environment
+                    console.print("[red]Both installation methods failed. Please try manually:[/red]")
+                    console.print("1. Create new virtual environment:")
+                    console.print("   python -m venv recon_venv")
+                    console.print("2. Activate it:")
+                    console.print("   source recon_venv/bin/activate")
+                    console.print("3. Install packages:")
+                    console.print("   pip install requests tzlocal flask rich Pillow PyPDF2")
                     sys.exit(1)
-        finally:
-            # Clean up temporary file
-            if os.path.exists(requirements_file):
-                os.remove(requirements_file)
 
     def run_in_venv(self, args):
         """Run script in virtual environment"""
