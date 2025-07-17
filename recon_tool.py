@@ -13,8 +13,8 @@ from datetime import datetime
 import webbrowser
 import base64
 import struct
-import sys
-import pkg_resources
+import shutil
+from typing import Optional, List, Dict, Any
 
 # Define constants
 VENV_DIR = "recon_venv"
@@ -26,6 +26,10 @@ REQUIREMENTS = [
     "Pillow>=10.2.0",
     "PyPDF2>=3.0.1"
 ]
+
+def is_venv() -> bool:
+    """Check if running in a virtual environment"""
+    return hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
 
 class VirtualEnvManager:
     def __init__(self):
@@ -46,14 +50,13 @@ class VirtualEnvManager:
 
     def cleanup(self):
         """Remove virtual environment directory"""
-        import shutil
         try:
             if os.path.exists(self.venv_dir):
                 shutil.rmtree(self.venv_dir)
         except Exception as e:
             print(f"Warning: Failed to cleanup virtual environment: {str(e)}")
 
-    def run_command(self, cmd, verbose=False):
+    def run_command(self, cmd: List[str], verbose: bool = False) -> bool:
         """Run a command and handle errors"""
         try:
             if verbose:
@@ -138,7 +141,7 @@ class VirtualEnvManager:
             console.print("[green]✓[/green] Virtual environment exists")
             self.install_requirements()
 
-    def install_requirements(self, verbose=False):
+    def install_requirements(self, verbose: bool = False):
         """Install required packages"""
         from rich.console import Console
         console = Console()
@@ -184,7 +187,7 @@ class VirtualEnvManager:
                     console.print("   pip install requests tzlocal flask rich Pillow PyPDF2")
                     sys.exit(1)
 
-    def run_in_venv(self, args):
+    def run_in_venv(self, args: List[str]):
         """Run script in virtual environment"""
         cmd = [self.python_executable] + args
         try:
@@ -552,7 +555,7 @@ def main():
 
 if __name__ == "__main__":
     # If running the script directly, execute in virtual environment
-    if not hasattr(sys, 'real_prefix') and not sys.base_prefix != sys.prefix:
+    if not is_venv():
         from rich.console import Console
         console = Console()
         console.print("[bold blue]→[/bold blue] Switching to virtual environment...")
