@@ -8,6 +8,154 @@ from datetime import datetime
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
+import subprocess
+import venv
+import shutil
+
+# Define constants
+VENV_DIR = "recon_venv"
+REQUIREMENTS = [
+    "PyPDF2>=3.0.1",
+    "reportlab>=4.0.8"
+]
+
+def is_venv():
+    """Check if running in a virtual environment"""
+    return hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
+
+class VirtualEnvManager:
+    def __init__(self):
+        self.venv_dir = VENV_DIR
+        self.is_windows = platform.system().lower() == "windows"
+        self.bin_dir = "Scripts" if self.is_windows else "bin"
+        
+        self.python_executable = os.path.join(
+            self.venv_dir,
+            self.bin_dir,
+            "python.exe" if self.is_windows else "python"
+        )
+        self.pip_executable = os.path.join(
+            self.venv_dir,
+            self.bin_dir,
+            "pip.exe" if self.is_windows else "pip"
+        )
+
+    def cleanup(self):
+        """Remove virtual environment directory"""
+        try:
+            if os.path.exists(self.venv_dir):
+                shutil.rmtree(self.venv_dir)
+        except Exception as e:
+            print(f"Warning: Failed to cleanup virtual environment: {str(e)}")
+
+    def run_command(self, cmd, verbose=False):
+        """Run a command and handle errors"""
+        try:
+            if verbose:
+                result = subprocess.run(cmd, text=True, capture_output=True)
+                if result.returncode != 0:
+                    print(f"Error output: {result.stderr}")
+                return result.returncode == 0
+            else:
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                return True
+        except subprocess.CalledProcessError as e:
+            if verbose:
+                print(f"Command failed: {' '.join(cmd)}")
+                print(f"Error: {str(e)}")
+            return False
+        except Exception as e:
+            if verbose:
+                print(f"Unexpected error: {str(e)}")
+            return False
+
+    def create_venv(self):
+        """Create virtual environment if it doesn't exist"""
+        if not os.path.exists(self.venv_dir):
+            print("[+] Creating virtual environment...")
+            try:
+                # First try to install python3-venv if not present (for Linux)
+                if platform.system().lower() != "windows":
+                    try:
+                        subprocess.run(["apt-get", "update"], 
+                                     stdout=subprocess.DEVNULL, 
+                                     stderr=subprocess.DEVNULL)
+                        subprocess.run(["apt-get", "install", "-y", "python3-venv"], 
+                                     stdout=subprocess.DEVNULL, 
+                                     stderr=subprocess.DEVNULL)
+                    except:
+                        pass  # Ignore if fails (might not be Debian-based or no sudo)
+                
+                venv.create(self.venv_dir, with_pip=True)
+                self.install_requirements(verbose=True)
+            except Exception as e:
+                print(f"[-] Failed to create virtual environment: {str(e)}")
+                self.cleanup()
+                print("\n[!] Please try these manual steps:")
+                print("1. Install python3-venv:")
+                print("   sudo apt-get update && sudo apt-get install python3-venv")
+                print("2. Create virtual environment:")
+                print("   python -m venv recon_venv")
+                print("3. Activate it:")
+                print("   source recon_venv/bin/activate")
+                print("4. Install requirements:")
+                print("   pip install PyPDF2 reportlab")
+                sys.exit(1)
+        else:
+            print("[+] Virtual environment exists")
+            self.install_requirements()
+
+    def install_requirements(self, verbose=False):
+        """Install required packages"""
+        if verbose:
+            print("[+] Installing requirements...")
+        
+        try:
+            # First upgrade pip
+            if not self.run_command([self.pip_executable, "install", "--upgrade", "pip"], verbose):
+                raise Exception("Failed to upgrade pip")
+
+            # Then install requirements one by one
+            for requirement in REQUIREMENTS:
+                if verbose:
+                    print(f"[+] Installing {requirement}...")
+                if not self.run_command([self.pip_executable, "install", requirement], verbose):
+                    raise Exception(f"Failed to install {requirement}")
+                
+            if verbose:
+                print("[+] All requirements installed successfully")
+                
+        except Exception as e:
+            print(f"[-] Error installing requirements: {str(e)}")
+            if verbose:
+                print("[!] Trying alternative installation method...")
+                try:
+                    # Try using python -m pip as alternative
+                    subprocess.check_call([
+                        self.python_executable, "-m", "pip", "install", 
+                        "PyPDF2", "reportlab"
+                    ], stdout=subprocess.DEVNULL if not verbose else None,
+                       stderr=subprocess.DEVNULL if not verbose else None)
+                    print("[+] Alternative installation successful")
+                except:
+                    self.cleanup()
+                    print("[-] Both installation methods failed. Please try manually:")
+                    print("1. Create virtual environment:")
+                    print("   python -m venv recon_venv")
+                    print("2. Activate it:")
+                    print("   source recon_venv/bin/activate")
+                    print("3. Install packages:")
+                    print("   pip install PyPDF2 reportlab")
+                    sys.exit(1)
+
+    def run_in_venv(self, args):
+        """Run script in virtual environment"""
+        cmd = [self.python_executable] + args
+        try:
+            subprocess.call(cmd)
+        except Exception as e:
+            print(f"[-] Error running in virtual environment: {str(e)}")
+            sys.exit(1)
 
 class DataCollectorHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -171,4 +319,11 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    # If running the script directly, execute in virtual environment
+    if not is_venv():
+        print("[+] Setting up virtual environment...")
+        venv_manager = VirtualEnvManager()
+        venv_manager.create_venv()
+        venv_manager.run_in_venv(sys.argv)
+    else:
+        main() 
